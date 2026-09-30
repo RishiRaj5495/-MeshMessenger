@@ -34,6 +34,9 @@ import androidx.core.app.ActivityCompat;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 
 
 public class MainActivity extends AppCompatActivity {
@@ -70,9 +73,13 @@ public class MainActivity extends AppCompatActivity {
 
     private final ExecutorService tcpExecutor =
             Executors.newCachedThreadPool();
+    private final Map<Socket, PrintWriter> connectedClients =
+            new ConcurrentHashMap<>();
 
     private boolean tcpServerRunning = false;
     private boolean tcpConnected = false;
+
+    private String myNodeId;
 
     // =========================
     // Chat UI
@@ -90,6 +97,13 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
 
         setContentView(R.layout.activity_main);
+        myNodeId = NodeIdentity.getNodeId(this);
+
+        Toast.makeText(
+                this,
+                "My Node ID: " + myNodeId,
+                Toast.LENGTH_LONG
+        ).show();
 
         // =========================
         // Find UI elements
@@ -641,81 +655,226 @@ public class MainActivity extends AppCompatActivity {
     // TCP SERVER
     // ============================================================
 
-    private void startTcpServer() {
+//    private void startTcpServer() {
+//
+//        if (tcpServerRunning) {
+//            return;
+//        }
+//
+//        tcpServerRunning = true;
+//
+//        tcpExecutor.execute(() -> {
+//
+//            try {
+//
+//                serverSocket =
+//                        new ServerSocket(TCP_PORT);
+//
+//                runOnUiThread(() -> {
+//
+//                    Toast.makeText(
+//                            MainActivity.this,
+//                            "TCP Server started on port "
+//                                    + TCP_PORT,
+//                            Toast.LENGTH_LONG
+//                    ).show();
+//
+//                    updateConnectionStatus(
+//                            "Status: TCP Server waiting..."
+//                    );
+//                });
+//
+//                // Wait for client
+//                clientSocket =
+//                        serverSocket.accept();
+//
+//                // TCP connection established
+//                setupStreams(clientSocket);
+//
+//                runOnUiThread(() -> {
+//
+//                    Toast.makeText(
+//                            MainActivity.this,
+//                            "TCP Client connected!",
+//                            Toast.LENGTH_LONG
+//                    ).show();
+//
+//                    updateConnectionStatus(
+//                            "Status: TCP Connected\n"
+//                                    + "Role: Group Owner"
+//                    );
+//                });
+//
+//                // Start receiving messages
+//                startMessageReceiver();
+//
+//            } catch (IOException e) {
+//
+//                tcpServerRunning = false;
+//
+//                runOnUiThread(() -> {
+//
+//                    Toast.makeText(
+//                            MainActivity.this,
+//                            "Server error: "
+//                                    + e.getMessage(),
+//                            Toast.LENGTH_LONG
+//                    ).show();
+//
+//                    updateConnectionStatus(
+//                            "Status: TCP Error"
+//                    );
+//                });
+//            }
+//        });
+//    }
+//
+private void startTcpServer() {
 
-        if (tcpServerRunning) {
-            return;
+    if (tcpServerRunning) {
+        return;
+    }
+
+    tcpServerRunning = true;
+
+    tcpExecutor.execute(() -> {
+
+        try {
+
+            serverSocket = new ServerSocket(TCP_PORT);
+
+            runOnUiThread(() -> {
+
+                Toast.makeText(
+                        MainActivity.this,
+                        "TCP Server started on port "
+                                + TCP_PORT,
+                        Toast.LENGTH_LONG
+                ).show();
+
+                updateConnectionStatus(
+                        "Status: TCP Server waiting...\n"
+                                + "Node: " + myNodeId
+                );
+            });
+
+            while (tcpServerRunning) {
+
+                Socket socket =
+                        serverSocket.accept();
+
+                connectedClients.put(
+                        socket,
+                        new PrintWriter(
+                                socket.getOutputStream(),
+                                true
+                        )
+                );
+
+                runOnUiThread(() -> {
+
+                    Toast.makeText(
+                            MainActivity.this,
+                            "TCP client connected!",
+                            Toast.LENGTH_SHORT
+                    ).show();
+
+                    updateConnectionStatus(
+                            "Status: TCP Connected\n"
+                                    + "Role: Group Owner\n"
+                                    + "Clients: "
+                                    + connectedClients.size()
+                    );
+                });
+
+                startClientReceiver(socket);
+            }
+
+        } catch (IOException e) {
+
+            tcpServerRunning = false;
+
+            runOnUiThread(() -> {
+
+                Toast.makeText(
+                        MainActivity.this,
+                        "Server error: "
+                                + e.getMessage(),
+                        Toast.LENGTH_LONG
+                ).show();
+
+                updateConnectionStatus(
+                        "Status: TCP Server Error"
+                );
+            });
         }
+    });
+}
 
-        tcpServerRunning = true;
+    private void startClientReceiver(Socket socket) {
 
         tcpExecutor.execute(() -> {
 
             try {
 
-                serverSocket =
-                        new ServerSocket(TCP_PORT);
+                BufferedReader clientReader =
+                        new BufferedReader(
+                                new InputStreamReader(
+                                        socket.getInputStream()
+                                )
+                        );
 
-                runOnUiThread(() -> {
+                String message;
 
-                    Toast.makeText(
-                            MainActivity.this,
-                            "TCP Server started on port "
-                                    + TCP_PORT,
-                            Toast.LENGTH_LONG
-                    ).show();
+                while (
+                        tcpServerRunning &&
+                                !socket.isClosed() &&
+                                (message = clientReader.readLine()) != null
+                ) {
 
-                    updateConnectionStatus(
-                            "Status: TCP Server waiting..."
-                    );
-                });
+                    String receivedMessage = message;
 
-                // Wait for client
-                clientSocket =
-                        serverSocket.accept();
+                    runOnUiThread(() -> {
 
-                // TCP connection established
-                setupStreams(clientSocket);
-
-                runOnUiThread(() -> {
-
-                    Toast.makeText(
-                            MainActivity.this,
-                            "TCP Client connected!",
-                            Toast.LENGTH_LONG
-                    ).show();
-
-                    updateConnectionStatus(
-                            "Status: TCP Connected\n"
-                                    + "Role: Group Owner"
-                    );
-                });
-
-                // Start receiving messages
-                startMessageReceiver();
+                        addMessage(
+                                "Received: "
+                                        + receivedMessage
+                        );
+                    });
+                }
 
             } catch (IOException e) {
 
-                tcpServerRunning = false;
-
                 runOnUiThread(() -> {
 
                     Toast.makeText(
                             MainActivity.this,
-                            "Server error: "
-                                    + e.getMessage(),
-                            Toast.LENGTH_LONG
+                            "TCP client disconnected",
+                            Toast.LENGTH_SHORT
                     ).show();
+                });
+
+            } finally {
+
+                connectedClients.remove(socket);
+
+                try {
+                    socket.close();
+                } catch (IOException ignored) {
+                }
+
+                runOnUiThread(() -> {
 
                     updateConnectionStatus(
-                            "Status: TCP Error"
+                            "Status: TCP Connected\n"
+                                    + "Role: Group Owner\n"
+                                    + "Clients: "
+                                    + connectedClients.size()
                     );
                 });
             }
         });
     }
-
-
     // ============================================================
     // TCP CLIENT
     // ============================================================
