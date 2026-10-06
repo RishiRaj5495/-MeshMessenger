@@ -61,7 +61,7 @@ public class MainActivity extends AppCompatActivity {
     // =========================
 
     private static final int TCP_PORT = 8888;
-
+    private static final String HELLO_PREFIX = "HELLO|";
     private ServerSocket serverSocket;
     private Socket clientSocket;
 
@@ -73,9 +73,12 @@ public class MainActivity extends AppCompatActivity {
 
     private final ExecutorService tcpExecutor =
             Executors.newCachedThreadPool();
+
     private final Map<Socket, PrintWriter> connectedClients =
             new ConcurrentHashMap<>();
 
+    private final Map<Socket, String> clientNodeIds =
+            new ConcurrentHashMap<>();
     private boolean tcpServerRunning = false;
     private boolean tcpConnected = false;
 
@@ -146,9 +149,7 @@ public class MainActivity extends AppCompatActivity {
         // Wi-Fi Direct Manager
         // =========================
 
-        wifiP2pManager =
-                (WifiP2pManager)
-                        getSystemService(Context.WIFI_P2P_SERVICE);
+        wifiP2pManager = (WifiP2pManager)getSystemService(Context.WIFI_P2P_SERVICE);
 
         // =========================
         // Wi-Fi Direct Channel
@@ -763,12 +764,15 @@ private void startTcpServer() {
                 Socket socket =
                         serverSocket.accept();
 
-                connectedClients.put(
-                        socket,
+                PrintWriter clientWriter =
                         new PrintWriter(
                                 socket.getOutputStream(),
                                 true
-                        )
+                        );
+
+                connectedClients.put(
+                        socket,
+                        clientWriter
                 );
 
                 runOnUiThread(() -> {
@@ -788,6 +792,9 @@ private void startTcpServer() {
                 });
 
                 startClientReceiver(socket);
+                clientWriter.println(
+                        HELLO_PREFIX + myNodeId
+                );
             }
 
         } catch (IOException e) {
@@ -834,13 +841,45 @@ private void startTcpServer() {
 
                     String receivedMessage = message;
 
-                    runOnUiThread(() -> {
+                    if (receivedMessage.startsWith(HELLO_PREFIX)) {
 
-                        addMessage(
-                                "Received: "
-                                        + receivedMessage
+                        String nodeId =
+                                receivedMessage.substring(
+                                        HELLO_PREFIX.length()
+                                );
+
+                        clientNodeIds.put(
+                                socket,
+                                nodeId
                         );
-                    });
+
+                        runOnUiThread(() -> {
+
+                            addMessage(
+                                    "Connected node: " + nodeId
+                            );
+
+                            updateConnectionStatus(
+                                    "Status: TCP Connected\n"
+                                            + "Role: Group Owner\n"
+                                            + "Clients: "
+                                            + connectedClients.size()
+                                            + "\n"
+                                            + "Known node: "
+                                            + nodeId
+                            );
+                        });
+
+                    } else {
+
+                        runOnUiThread(() -> {
+
+                            addMessage(
+                                    "Received: "
+                                            + receivedMessage
+                            );
+                        });
+                    }
                 }
 
             } catch (IOException e) {
@@ -857,6 +896,7 @@ private void startTcpServer() {
             } finally {
 
                 connectedClients.remove(socket);
+                clientNodeIds.remove(socket);
 
                 try {
                     socket.close();
@@ -900,7 +940,9 @@ private void startTcpServer() {
 
                 // Setup input/output streams
                 setupStreams(clientSocket);
-
+                writer.println(
+                        HELLO_PREFIX + myNodeId
+                );
                 runOnUiThread(() -> {
 
                     Toast.makeText(
@@ -1047,10 +1089,38 @@ private void startTcpServer() {
 
                     runOnUiThread(() -> {
 
-                        addMessage(
-                                "Other: "
-                                        + receivedMessage
-                        );
+//                        addMessage(
+//                                "Other: "
+//                                        + receivedMessage
+//                        );
+
+                        if (receivedMessage.startsWith(HELLO_PREFIX)) {
+
+                            String nodeId =
+                                    receivedMessage.substring(
+                                            HELLO_PREFIX.length()
+                                    );
+
+                            runOnUiThread(() -> {
+
+                                addMessage(
+                                        "Connected to node: "
+                                                + nodeId
+                                );
+                            });
+
+                        } else {
+
+                            runOnUiThread(() -> {
+
+                                addMessage(
+                                        "Other: "
+                                                + receivedMessage
+                                );
+                            });
+                        }
+
+
                     });
                 }
 
